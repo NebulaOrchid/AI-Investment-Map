@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.claude/
+_datagen_tmp.js
+_dg.js
