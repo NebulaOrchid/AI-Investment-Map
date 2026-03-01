@@ -11,7 +11,7 @@ for (let y = 2024; y <= 2027; y++) {
 }
 // QS[0]="2024-12", QS[14]="2026-02" (now), QS[36]="2027-12"
 const qi = (y, m) => QS.findIndex((x) => x.y === y && x.m === m);
-const SLIDER_MIN = 0;
+const SLIDER_MIN = 1; // Start at Jan 2025 (skip Dec 2024)
 const NOW_IDX = qi(2026, 2); // Feb 2026 = "today"
 const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 function fmtMonthKey(key) { if (!key) return ""; const [y,m] = key.split("-"); return `${MONTH_NAMES[parseInt(m)-1]} ${y}`; }
@@ -861,24 +861,28 @@ function truncName(name, maxChars) {
    ═══════════════════════════════════════════ */
 function Legend({ activeZones, onToggleZone }) {
   const zones = [
-    { id:"prod_performing", label:"Live – Performing", grad:ZONE_LEGEND.prod_performing },
-    { id:"prod_underperforming", label:"Live – Under-Performing", grad:ZONE_LEGEND.prod_underperforming },
-    { id:"prod_nonperforming", label:"Live – Non-Performing", grad:ZONE_LEGEND.prod_nonperforming },
-    { id:"build_ontrack", label:"Building – On Track", grad:ZONE_LEGEND.build_ontrack, stripe:true, stripeColor:BUILD_STRIPE.build_ontrack },
-    { id:"build_atrisk", label:"Building – At Risk", grad:ZONE_LEGEND.build_atrisk, stripe:true, stripeColor:BUILD_STRIPE.build_atrisk },
-    { id:"build_distressed", label:"Building – Stalled", grad:ZONE_LEGEND.build_distressed, stripe:true, stripeColor:BUILD_STRIPE.build_distressed },
+    { id:"prod_performing", label:"Live – Performing", grad:ZONE_LEGEND.prod_performing, tint:"rgba(26,92,68,.1)" },
+    { id:"prod_underperforming", label:"Live – Under-Performing", grad:ZONE_LEGEND.prod_underperforming, tint:"rgba(107,85,40,.1)" },
+    { id:"prod_nonperforming", label:"Live – Non-Performing", grad:ZONE_LEGEND.prod_nonperforming, tint:"rgba(107,40,40,.1)" },
+    { id:"build_ontrack", label:"Building – On Track", grad:ZONE_LEGEND.build_ontrack, stripe:true, stripeColor:BUILD_STRIPE.build_ontrack, tint:"rgba(26,92,68,.08)" },
+    { id:"build_atrisk", label:"Building – At Risk", grad:ZONE_LEGEND.build_atrisk, stripe:true, stripeColor:BUILD_STRIPE.build_atrisk, tint:"rgba(107,85,40,.08)" },
+    { id:"build_distressed", label:"Building – Stalled", grad:ZONE_LEGEND.build_distressed, stripe:true, stripeColor:BUILD_STRIPE.build_distressed, tint:"rgba(107,40,40,.08)" },
   ];
   const anyActive = activeZones.size > 0;
   return (
-    <div style={{display:"flex",flexWrap:"wrap",gap:20,alignItems:"center",fontSize:14,fontWeight:500,color:"#D1D5DB"}}>
+    <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center",fontSize:14,fontWeight:500,color:"#D1D5DB"}}>
       {zones.map(z => {
         const isOn = activeZones.has(z.id);
         const dimmed = anyActive && !isOn;
         return (
           <div key={z.id} className="lg-item" onClick={() => onToggleZone(z.id)}
-            style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",opacity:dimmed?0.35:1,transition:"opacity .2s",userSelect:"none"}}>
-            <div style={{width:14,height:14,borderRadius:3,background:z.grad,position:"relative",overflow:"hidden",
-              border:isOn?"2px solid #FFFFFF":"1px solid rgba(255,255,255,0.08)",transition:"border .2s"}}>
+            style={{display:"flex",alignItems:"center",gap:7,cursor:"pointer",
+              padding:"5px 14px",borderRadius:100,
+              background:isOn?"rgba(255,255,255,.12)":z.tint,
+              border:isOn?"1px solid rgba(255,255,255,.3)":"1px solid rgba(255,255,255,.08)",
+              opacity:dimmed?0.35:1,
+              transition:"all .2s",userSelect:"none"}}>
+            <div style={{width:14,height:14,borderRadius:3,background:z.grad,position:"relative",overflow:"hidden",flexShrink:0}}>
               {z.stripe && <div style={{position:"absolute",inset:0,backgroundImage:`repeating-linear-gradient(135deg,${z.stripeColor},${z.stripeColor} 3px,transparent 3px,transparent 6px)`}}/>}
             </div>
             <span>{z.label}</span>
@@ -887,7 +891,8 @@ function Legend({ activeZones, onToggleZone }) {
       })}
       {anyActive && (
         <div onClick={() => onToggleZone(null)}
-          style={{cursor:"pointer",fontSize:13,color:"#9CA3AF",borderBottom:"1px dashed #9CA3AF",paddingBottom:1,userSelect:"none"}}>
+          style={{cursor:"pointer",fontSize:13,color:"#9CA3AF",padding:"5px 14px",borderRadius:100,
+            border:"1px dashed rgba(255,255,255,.18)",userSelect:"none",transition:"all .2s"}}>
           Clear
         </div>
       )}
@@ -974,6 +979,7 @@ export default function AIPortfolio() {
   const [activeZones, setActiveZones] = useState(new Set());
   const toggleZone = useCallback((zoneId) => {
     if (zoneId === null) { setActiveZones(new Set()); setSelected(null); return; }
+    setHotSeat(false); // auto-clear Capital at Risk when using legend
     setActiveZones(prev => {
       const next = new Set(prev);
       if (next.has(zoneId)) next.delete(zoneId); else next.add(zoneId);
@@ -1048,9 +1054,15 @@ export default function AIPortfolio() {
         enrichData(d, init.id, dIdx, prevROI);
         return { id: init.id, name: init.name, cat: init.cat, owner: init.owner, bu: init.bu, d, type: "initiative", value: Math.max(d.spend, 200000) };
       }).filter(Boolean);
+      // Group initiatives by BU for basket layout
+      const buData = {};
+      data.forEach(item => {
+        if (!buData[item.bu]) buData[item.bu] = [];
+        buData[item.bu].push(item);
+      });
       const ts = data.reduce((s,i) => s+i.d.spend, 0);
       const agg = aggregate(data.map(i => i.d));
-      return { items: data, buRegions: null, totalSpend: ts, totals: { ...agg, count: data.length } };
+      return { items: data, buRegions: buData, totalSpend: ts, totals: { ...agg, count: data.length } };
     }
 
     // 3-month-ago key for momentum calculation
@@ -1203,22 +1215,23 @@ export default function AIPortfolio() {
 
   // Compute treemap rects
   const rects = useMemo(() => {
-    if (orgLevel === "div" && buRegions) {
-      // Nested: first layout BU regions, then divisions within
+    if (buRegions) {
+      // Nested: first layout BU regions, then items within
+      const isFirm = orgLevel === "firm";
       const buItems = Object.keys(buRegions).map(bu => ({
         id: bu, name: BU_NAMES[bu], bu,
         value: buRegions[bu].reduce((s,d) => s + d.value, 0),
-        divisions: buRegions[bu],
+        children: buRegions[bu],
       }));
       const buRects = tmLayout(buItems, mapW, mapH);
       const allRects = [];
       const buBorders = [];
       buRects.forEach(br => {
-        const pad = 22; // top padding for BU label
-        const innerPad = 3;
+        const pad = isFirm ? 14 : 22; // top padding for BU label (tighter for firm)
+        const innerPad = isFirm ? 2 : 3; // gutter half-width (tighter for firm)
         buBorders.push({ id: br.id, name: br.name, bu: br.bu, x: br.x, y: br.y, w: br.w, h: br.h });
-        const divRects = tmLayout(br.divisions, br.w - innerPad*2, br.h - pad - innerPad, br.x + innerPad, br.y + pad);
-        allRects.push(...divRects);
+        const innerRects = tmLayout(br.children, br.w - innerPad*2, br.h - pad - innerPad, br.x + innerPad, br.y + pad);
+        allRects.push(...innerRects);
       });
       return { rects: allRects, buBorders };
     }
@@ -1275,14 +1288,18 @@ export default function AIPortfolio() {
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
         .kc{background:rgba(255,255,255,.06);border-radius:14px;padding:15px 18px;border:1px solid rgba(255,255,255,.08);transition:all .25s}
+        .kc-action{border:1px dashed rgba(255,255,255,.15)}
+        .kc-action:hover{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);transform:translateY(-2px);box-shadow:0 4px 16px rgba(0,0,0,.3)}
+        .kc-active{background:rgba(220,38,38,0.12)!important;border:1px solid rgba(220,38,38,0.35)!important;box-shadow:0 0 12px rgba(220,38,38,0.12)!important}
+        .kc-active:hover{background:rgba(220,38,38,0.18)!important;border:1px solid rgba(220,38,38,0.45)!important}
         .kc:hover{background:rgba(255,255,255,.09);transform:translateY(-1px)}
         .kl{font-size:14px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#FFFFFF;margin-bottom:7px}
         .kv{font-family:'JetBrains Mono',monospace;font-size:30px;font-weight:700;line-height:1}
         .ks{font-size:13px;color:#D1D5DB;margin-top:5px;font-weight:500}
         .cp{padding:6px 14px;border-radius:100px;font-size:11px;font-weight:600;cursor:pointer;border:1.5px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);color:#9CA3AF;transition:all .2s;user-select:none}
         .cp:hover{border-color:rgba(255,255,255,.2)}.cp.on{background:#F1F5F9;color:#0F172A;border-color:#F1F5F9}
-        .lg-item{padding:4px 10px;border-radius:6px;transition:background .15s,color .15s}
-        .lg-item:hover{background:rgba(255,255,255,.1);color:#FFFFFF}
+        .lg-item{transition:all .15s}
+        .lg-item:hover{background:rgba(255,255,255,.1)!important;border-color:rgba(255,255,255,.2)!important;color:#FFFFFF}
         .sl{-webkit-appearance:none;appearance:none;width:100%;height:5px;border-radius:3px;background:rgba(255,255,255,.08);outline:none;cursor:pointer}
         .sl::-webkit-slider-thumb{-webkit-appearance:none;width:22px;height:22px;border-radius:50%;background:#F1F5F9;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4),0 0 0 4px rgba(241,245,249,.12)}
         .pb{width:40px;height:40px;border-radius:50%;border:2px solid rgba(255,255,255,.2);background:rgba(255,255,255,.05);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;color:#F1F5F9;flex-shrink:0}
@@ -1306,7 +1323,7 @@ export default function AIPortfolio() {
       `}</style>
 
       {/* HEADER */}
-      <div style={{padding:"28px 40px 0"}}>
+      <div style={{padding:"16px 40px 0"}}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
           <div>
             <h1 style={{fontSize:28,fontWeight:700,letterSpacing:"-0.8px",color:"#F1F5F9"}}>
@@ -1326,7 +1343,7 @@ export default function AIPortfolio() {
         </div>
 
         {/* KPIs */}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginTop:22}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginTop:16}}>
           <div className="kc">
             <div className="kl">Total Invested</div>
             <div className="kv" style={{color:"#FFFFFF"}}>{fmt(totals.spend)}</div>
@@ -1347,9 +1364,7 @@ export default function AIPortfolio() {
             <div className="kv" style={{color:"#FBBF24"}}>{totals.lifetimeROI.toFixed(2)}x</div>
             <div className="ks">all-time return</div>
           </div>
-          <div className="kc" onClick={() => setHotSeat(!hotSeat)} style={{cursor:"pointer",
-            background:hotSeat?"rgba(220,38,38,0.12)":"rgba(255,255,255,0.06)",
-            border:hotSeat?"1px solid rgba(220,38,38,0.35)":"1px solid rgba(220,38,38,0.15)"}}>
+          <div className={`kc kc-action${hotSeat?" kc-active":""}`} onClick={() => { setActiveZones(new Set()); setHotSeat(!hotSeat); }} style={{cursor:"pointer"}}>
             <div className="kl">Capital at Risk</div>
             <div className="kv" style={{color:"#EF4444"}}>{fmt(capitalAtRisk)}</div>
             <div className="ks" style={{color:hotSeat?"#FCA5A5":"#D1D5DB"}}>{hotSeat ? "click to reset" : "click to isolate"}</div>
@@ -1377,19 +1392,37 @@ export default function AIPortfolio() {
               <svg width="12" height="12" viewBox="0 0 14 14"><polygon points="3,0 14,7 3,14"/></svg>
             )}
           </button>
-          <div style={{flex:1,position:"relative"}}>
-            <input type="range" min={SLIDER_MIN} max={QS.length-1} value={qI} onChange={e=>setQI(parseInt(e.target.value))} className="sl" style={{background:`linear-gradient(to right, rgba(241,245,249,.35) ${(qI/(QS.length-1))*100}%, rgba(255,255,255,.08) ${(qI/(QS.length-1))*100}%)`}}/>
-            {/* NOW marker */}
-            <div style={{position:"absolute",left:`${(NOW_IDX/(QS.length-1))*100}%`,top:-20,transform:"translateX(-50%)",pointerEvents:"none",display:"flex",flexDirection:"column",alignItems:"center"}}>
-              <span style={{fontSize:11,fontWeight:700,fontFamily:"'JetBrains Mono'",color:"#34D399",letterSpacing:1,marginBottom:2}}>NOW</span>
-              <div style={{width:2,height:14,background:"#34D399",borderRadius:1}}/>
-            </div>
-            <div style={{display:"flex",justifyContent:"space-between",marginTop:8,fontSize:13,fontFamily:"'JetBrains Mono'",color:"#9CA3AF",letterSpacing:.5,position:"relative",height:18}}>
-              {[2025,2026,2027].map(y=>{
-                const yIdx = QS.findIndex(q=>q.y===y&&q.m===1);
-                return <span key={y} style={{position:"absolute",left:`${(yIdx/(QS.length-1))*100}%`,transform:"translateX(-50%)",fontWeight:QS[qI]?.y===y?700:500,color:QS[qI]?.y===y?"#FFFFFF":"#9CA3AF"}}>{y}</span>;
-              })}
-            </div>
+          <div style={{flex:1,position:"relative",paddingBottom:26}}>
+            {(() => {
+              const slRange = QS.length - 1 - SLIDER_MIN;
+              const pct = v => ((v - SLIDER_MIN) / slRange) * 100;
+              const thumbR = 11; // half of 22px thumb
+              return <>
+                <input type="range" min={SLIDER_MIN} max={QS.length-1} value={qI} onChange={e=>setQI(parseInt(e.target.value))} className="sl" style={{background:`linear-gradient(to right, rgba(241,245,249,.35) ${pct(qI)}%, rgba(255,255,255,.08) ${pct(qI)}%)`}}/>
+                {/* NOW marker — padded to match thumb dead zone */}
+                <div style={{position:"absolute",left:thumbR,right:thumbR,top:-20,pointerEvents:"none"}}>
+                  <div style={{position:"absolute",left:`${pct(NOW_IDX)}%`,transform:"translateX(-50%)",display:"flex",flexDirection:"column",alignItems:"center"}}>
+                    <span style={{fontSize:11,fontWeight:700,fontFamily:"'JetBrains Mono'",color:"#34D399",letterSpacing:1,marginBottom:2}}>NOW</span>
+                    <div style={{width:2,height:14,background:"#34D399",borderRadius:1}}/>
+                  </div>
+                </div>
+                {/* Year labels — padded container matches thumb dead zone */}
+                <div style={{position:"absolute",left:thumbR,right:thumbR,top:22,fontSize:13,fontFamily:"'JetBrains Mono'",color:"#9CA3AF",letterSpacing:.5,height:18}}>
+                  {[2025,2026,2027].map(y=>{
+                    const yIdx = QS.findIndex(q=>q.y===y&&q.m===1);
+                    const isActive = QS[qI]?.y===y;
+                    // Always count from INITS (raw initiatives), not view-specific items
+                    const activeInits = isActive ? INITS.filter(init => { const d = init.tl.find(t => t.key === qKey); return d && d.phase !== "future"; }) : [];
+                    const liveCount = activeInits.filter(init => { const d = init.tl.find(t => t.key === qKey); return d.phase !== "building"; }).length;
+                    const buildCount = activeInits.length - liveCount;
+                    const total = activeInits.length;
+                    return <span key={y} style={{position:"absolute",left:`${pct(yIdx)}%`,fontWeight:isActive?700:500,color:isActive?"#FFFFFF":"#9CA3AF",whiteSpace:"nowrap"}}>
+                      {y}{isActive && <span style={{color:"#9CA3AF",fontWeight:500,fontSize:11,marginLeft:8}}>{total} use cases ({liveCount} live · {buildCount} building){qI > NOW_IDX && <span style={{color:"#FBBF24",fontWeight:700,fontSize:10,marginLeft:8,letterSpacing:1}}>PROJECTED</span>}</span>}
+                    </span>;
+                  })}
+                </div>
+              </>;
+            })()}
           </div>
         </div>
 
@@ -1468,8 +1501,11 @@ export default function AIPortfolio() {
             transformOrigin:"top left",
             transition: isPanning ? "none" : "width 0.5s ease, height 0.5s ease",
           }}>
-            {/* BU borders for division view */}
-            {rects.buBorders && rects.buBorders.map(br => (
+            {/* BU baskets — bordered for both Division and All views */}
+            {rects.buBorders && rects.buBorders.map(br => {
+              const isFirm = orgLevel === "firm";
+              const zInv = 1/Math.sqrt(zoom);
+              return (
               <div key={`bu_${br.id}`} style={{
                 position:"absolute", left:br.x, top:br.y, width:br.w, height:br.h,
                 border:`${1/zoom}px solid rgba(255,255,255,.12)`,
@@ -1477,15 +1513,18 @@ export default function AIPortfolio() {
                 background:"rgba(255,255,255,.02)",
               }}>
                 <div style={{
-                  position:"absolute",top:4,left:8,
-                  fontSize:zoom>1.3 ? 13/Math.max(zoom,1.3) : 13,
-                  fontWeight:700,color:"#FFFFFF",
-                  letterSpacing:1,textTransform:"uppercase",
+                  position:"absolute",top:isFirm?2:4,left:isFirm?4:8,
+                  fontSize:(isFirm ? 10 : 13) * zInv,
+                  fontWeight:700,
+                  color:"#FFFFFF",
+                  letterSpacing:isFirm ? .6 : 1,
+                  textTransform:"uppercase",
+                  pointerEvents:"none",
                 }}>
                   {br.name}
                 </div>
               </div>
-            ))}
+            );})}
 
             {/* Boxes — Semantic Zoom Tiers
                  LOW  (zoom ≤ 0.6): color dots only, no text
@@ -1972,10 +2011,10 @@ export default function AIPortfolio() {
 
         {/* ORG SLIDER — vertical, same pattern as timeline */}
         {(() => {
-          // Inverted: DIV=2 (top), BU=1 (mid), FIRM=0 (bottom) — because rotate(-90deg) flips min→bottom, max→top
-          const orgVal = orgLevel==="div"?2:orgLevel==="bu"?1:0;
-          const fillPct = ((2-orgVal)/2)*100; // fill from top (DIV) down to current
-          const labels = [{key:"div",label:"Division",pos:0},{key:"bu",label:"BU",pos:50},{key:"firm",label:"Firm",pos:100}];
+          // BU=2 (top), DIV=1 (mid, default), FIRM=0 (bottom) — because rotate(-90deg) flips min→bottom, max→top
+          const orgVal = orgLevel==="bu"?2:orgLevel==="div"?1:0;
+          const fillPct = ((2-orgVal)/2)*100; // fill from top (BU) down to current
+          const labels = [{key:"bu",label:"BU",pos:0},{key:"div",label:"Division",pos:50},{key:"firm",label:"All",pos:100}];
           return (
             <div style={{display:"flex",alignItems:"center",justifyContent:"center",width:90,flexShrink:0}}>
               {/* Labels on the left */}
@@ -1994,7 +2033,7 @@ export default function AIPortfolio() {
               <div style={{position:"relative",width:22,height:160,display:"flex",alignItems:"center",justifyContent:"center"}}>
                 <input type="range" min={0} max={2} step={1}
                   value={orgVal}
-                  onChange={e=>{const v=parseInt(e.target.value);setOrgLevel(v===2?"div":v===1?"bu":"firm");setSelected(null);}}
+                  onChange={e=>{const v=parseInt(e.target.value);setOrgLevel(v===2?"bu":v===1?"div":"firm");setSelected(null);}}
                   className="org-sl"
                   style={{
                     background:`linear-gradient(to right, rgba(255,255,255,.08) ${fillPct}%, rgba(241,245,249,.35) ${fillPct}%)`,
